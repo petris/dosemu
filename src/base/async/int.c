@@ -1394,6 +1394,11 @@ int can_revector(int i)
   case DOS_HELPER_INT:		/* e6 for redirector and helper (was 0xfe) */
   case 0xe7:			/* for mfs FCB helper */
     return REVECT;
+  /* following 3 vectors must be revectored for DPMI */
+  case 0x1c:			/* ROM BIOS timer tick interrupt */
+  case 0x23:			/* DOS Ctrl+C interrupt */
+  case 0x24:			/* DOS critical error interrupt */
+    return config.dpmi ? REVECT : NO_REVECT;
 
   case 0x33:			/* Mouse. Wrapper for mouse-garrot as well*/
     if (config.mouse.intdrv || config.hogthreshold)
@@ -1643,6 +1648,12 @@ static int int29(void) {
     /* char in AL */
   char_out(*(char *) &REG(eax), READ_BYTE(BIOS_CURRENT_SCREEN_PAGE));
   return 1;
+}
+
+static int int_1c_23_24(void) {
+  /* chain handler for int1c/23/24 to avoid having to change too
+     much logic in run_caller_func */
+  return 0;
 }
 
 static int int2f(void)
@@ -2097,7 +2108,10 @@ void setup_interrupts(void) {
   interrupt_function[0x18] = int18;
   interrupt_function[0x19] = int19;
   interrupt_function[0x1a] = int1a;
+  interrupt_function[0x1c] = int_1c_23_24;
   interrupt_function[0x21] = int21;
+  interrupt_function[0x23] = int_1c_23_24;
+  interrupt_function[0x24] = int_1c_23_24;
   interrupt_function[0x28] = int28;
   interrupt_function[0x29] = int29;
   interrupt_function[0x2f] = int2f;
