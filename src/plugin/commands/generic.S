@@ -16,6 +16,8 @@
 	.globl	_start16
 _start16:
 
+#include "detect.h"
+        
 #define	DOS_HELPER_COMMANDS	0xc0
 #define	saved_ax		0x108
 #define real_psp		0x10a
