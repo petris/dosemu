@@ -701,7 +701,11 @@ static void put_tx(int num, int val)
     rtrn = RPT_SYSCALL(write(com[num].fd, &val, 1));   /* Attempt char xmit */
     if (rtrn != 1) 				/* Did transmit fail? */
       com[num].tx_overflow = 1; 		/* Set overflow flag */
+#if 0
+    /* This slows the transfer. There might be better way of avoiding
+     * queueing. */
     else tcdrain(com[num].fd);
+#endif
   }
   if (!com[num].fifo_enable ||
        com[num].tx_buf_bytes >= (TX_BUFFER_SIZE-1)) 	/* Is FIFO full? */
@@ -821,7 +825,8 @@ put_mcr(int num, int val)
   if (val & UART_MCR_LOOP) {		/* Is Loopback Mode set? */
     /* If loopback just enabled, clear FIFO and turn off DTR & RTS on line */
     if (changed & UART_MCR_LOOP) {		/* Was loopback just set? */
-      uart_clear_fifo(num,UART_FCR_CLEAR_CMD);	/* Clear FIFO's */
+      if (com[num].fifo_enable)
+        uart_clear_fifo(num,UART_FCR_CLEAR_CMD);	/* Clear FIFO's */
       control = TIOCM_DTR | TIOCM_RTS;		/* DTR and RTS to be cleared */
       ioctl(com[num].fd, TIOCMBIC, &control);	/* Clear DTR and RTS */
     }
@@ -849,7 +854,10 @@ put_mcr(int num, int val)
   }
   else {				/* It's not in Loopback Mode */
     /* Was loopback mode just turned off now?  Then reset FIFO */
-    if (changed & UART_MCR_LOOP) uart_clear_fifo(num,UART_FCR_CLEAR_CMD);
+    if (changed & UART_MCR_LOOP) {
+      if (com[num].fifo_enable)
+        uart_clear_fifo(num,UART_FCR_CLEAR_CMD);
+    }
 
     /* Set interrupt enable flag according to OUT2 bit in MCR */
     com[num].int_enab = (val & UART_MCR_OUT2) ? 1 : 0;
@@ -1087,6 +1095,10 @@ do_serial_out(int num, ioport_t address, int val)
       if(s2_printf) s_printf("SER%d: Divisor MSB = 0x%x\n", num, val);
     }
     else {			/* Else, write to Interrupt Enable Register */
+      if ( !(com[num].IER & 2) && (val & 2) ) {
+        /* Flag to allow THRI if enable THRE went from state 0 -> 1 */
+        com[num].tx_trigger = 1;
+      }
       com[num].IER = (val & 0xF);	/* Write to IER */
       if(s1_printf) s_printf("SER%d: Write IER = 0x%x\n", num, val);
       serial_int_engine(num, 0);		/* Update interrupt status */
