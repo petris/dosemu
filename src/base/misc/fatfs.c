@@ -45,6 +45,7 @@
 
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
+#include "emu.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -56,7 +57,6 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
-#include "emu.h"
 #include "disks.h"
 #include "fatfs.h"
 #include "doshelpers.h"
@@ -488,7 +488,7 @@ void scan_dir(fatfs_t *f, unsigned oi)
     }
 
     /* look for "IO.SYS" & "MSDOS.SYS" */
-    dir = opendir(name = full_name(f, oi, ""));
+    dir = opendir(full_name(f, oi, ""));
     if(dir != NULL) {
       while((dent = readdir(dir))) {
         if(!strcasecmp(dent->d_name, "io.sys") &&
@@ -551,6 +551,7 @@ void scan_dir(fatfs_t *f, unsigned oi)
 
     if((f->sys_type & 0x30) == 0x20) {
       f->sys_type = 0x20;	/* FreeDOS, FD maintained kernel */
+      name = full_name(f, oi, "");
       sf[0] = "kernel.sys";
       scans = 2;
       bootfile = malloc(strlen(name) + strlen(sf[0]) + 1);
@@ -1075,10 +1076,13 @@ void build_boot_blk(fatfs_t *f)
    * Make sure this messages are not too long; they should not extend
    * beyond 0x7ded (incl. final '\0').
    */
-  char *msg = "\r\nSorry, could not load an operating system.\r\n"
-"Please try to install FreeDOS from dosemu-freedos-*-bin.tgz\r\n";
-  char *msg1 = "\r\nSorry, there is no operating system.\r\n"
-"Please try to install FreeDOS from dosemu-freedos-*-bin.tgz\r\n";
+  char *msg_f = "\r\nSorry, could not load an operating system from\r\n%s\r\n\r\n"
+"Please try to install FreeDOS from dosemu-freedos-*-bin.tgz\r\n\r\n"
+"Press any key to return to Linux...\r\n";
+  char *msg1_f = "\r\nSorry, there is no operating system here:\r\n%s\r\n\r\n"
+"Please try to install FreeDOS from dosemu-freedos-*-bin.tgz\r\n\r\n"
+"Press any key to return to Linux...\r\n";
+  char *msg, *msg1;
 
   int i;
   unsigned r_o, d_o, t_o;
@@ -1087,6 +1091,8 @@ void build_boot_blk(fatfs_t *f)
 
   if(!(f->boot_sec = malloc(0x200))) return;
 
+  asprintf(&msg, msg_f, f->dir);
+  asprintf(&msg1, msg1_f, f->dir);
   b = f->boot_sec;
   memset(b, 0, 0x200);
   b[0x00] = 0xeb;	/* jmp 0x7c40 */
@@ -1234,6 +1240,8 @@ void build_boot_blk(fatfs_t *f)
       fatfs_msg("boot block has no boot program\n");
       break;
   }
+  free(msg);
+  free(msg1);
 }
 
 
