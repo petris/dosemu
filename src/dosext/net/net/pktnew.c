@@ -774,6 +774,8 @@ pkt_check_receive(int timeout)
 		/* it should not be there... */
 
 		if (size >= 0) {
+		    char *p;
+
 		    /* verify the source of the packet. when not from eth0, */
 		    /* discard it for now (multiple network cards are next) */
 
