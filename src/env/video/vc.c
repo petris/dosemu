@@ -149,7 +149,7 @@ SIGACQUIRE_call (void)
       /*      if (config.vga) dos_unpause(); */
       unfreeze_dosemu();
     }
-  parent_open_mouse ();
+  unfreeze_mouse();
 }
 
 int dos_has_vt = 1;
@@ -228,7 +228,7 @@ SIGRELEASE_call (void)
   if (scr_state.current == 1)
     {
       v_printf ("VID: Releasing VC\n");
-      parent_close_mouse ();
+      freeze_mouse();
       if (!scr_state.vt_allow)
 	{
 	  v_printf ("disallowed vt switch!\n");

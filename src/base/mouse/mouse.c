@@ -105,6 +105,8 @@ static int mouse_events = 0;
 static mouse_erase_t mouse_erase;
 static int sent_mouse_esc = FALSE;
 
+static int parent_open_mouse (void);
+
 static mouse_t *mice = &config.mouse;
 /* the 'volatile' is there to cover some bug in gcc -O -g3 */
 volatile struct mouse_struct mouse;
@@ -1963,7 +1965,7 @@ void mouse_io_callback(void)
   }
 }
 
-void parent_close_mouse (void)
+static void parent_close_mouse (void)
 {
   if (mice->intdrv)
      {
@@ -1982,7 +1984,7 @@ void parent_close_mouse (void)
     child_close_mouse ();
 }
 
-int parent_open_mouse (void)
+static int parent_open_mouse (void)
 {
   if (mice->intdrv)
     {
@@ -2056,14 +2058,14 @@ dosemu_mouse_close(void)
         m_printf("mouse_close: tcsetattr failed: %s\n",strerror(errno));
     }
     m_printf("mouse_close: closing mouse device, fd=%d\n",mice->fd);
-    close(mice->fd);
+    parent_close_mouse();
     m_printf("mouse_close: ok\n");
     return;
   }
 
   if (((mice->type == MOUSE_PS2) || (mice->type == MOUSE_IMPS2) ||
        (mice->type == MOUSE_BUSMOUSE)) && (mice->fd != -1))
-    close(mice->fd);
+    parent_close_mouse();
 }
 
 /* TO DO LIST: (in no particular order)

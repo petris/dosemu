@@ -49,6 +49,8 @@
 
 static void DOSEMUSetMouseSpeed(int old, int new, unsigned cflag);
 
+static int mouse_frozen = 0;
+
 /*
  * DOSEMUSetupMouse --
  *	Sets up the mouse parameters
@@ -441,6 +443,24 @@ static void DOSEMUSetMouseSpeed(int old, int new, unsigned cflag)
 	{
 		m_printf("MOUSE: Unable to set mouse attributes. Mouse may not function properly.\n");
 	}
+}
+
+void freeze_mouse(void)
+{
+  mouse_t *mice = &config.mouse;
+  if (mouse_frozen || mice->fd == -1)
+    return;
+  remove_from_io_select(mice->fd, 1);
+  mouse_frozen = 1;
+}
+
+void unfreeze_mouse(void)
+{
+  mouse_t *mice = &config.mouse;
+  if (!mouse_frozen || mice->fd == -1)
+    return;
+  add_to_io_select(mice->fd, 1, mouse_io_callback);
+  mouse_frozen = 0;
 }
 
 void DOSEMUMouseEvents(void)
