@@ -47,6 +47,13 @@
  *
  * HISTORY:
  * $Log$
+ * Revision 1.2.2.8  2004/11/27 10:41:10  bartoldeman
+ * 1.2: Don't use asprintf() in exists() as there may not be enough space
+ * (fullname can become longer in find_file as names are unmangled).
+ * This caused a very nasty SIGSEGV when trying to delete a mangled name.
+ * Change to cheaper allocation on the stack with NAME_MAX+1 bytes for
+ * the filename component.
+ *
  * Revision 1.2.2.7  2004/07/11 04:19:54  bartoldeman
  * Backport MFS negative offset fix.
  *
@@ -1018,13 +1025,10 @@ static void dos83_to_ufs(char *name, const char *mname, const char *mext)
 /* check if name/filename exists as such if it does not contain wildcards */
 static boolean_t exists(const char *name, const char *filename, struct stat *st)
 {
-  boolean_t ret;
-  char *fullname;
-  asprintf(&fullname, "%s/%s", name, filename);
+  char fullname[strlen(name) + 1 + NAME_MAX + 1];
+  snprintf(fullname, sizeof(fullname), "%s/%s", name, filename);
   Debug0((dbg_fd, "exists() result = %s\n", fullname));
-  ret = find_file(fullname, st);
-  free(fullname);
-  return ret;
+  return find_file(fullname, st);
 }
 
 static struct dir_list *get_dir(char *name, char *mname, char *mext)
