@@ -54,7 +54,7 @@ static struct vm86_regs INT15_SAVED_REGS;
     DPMI_private_paragraphs + DTA_Para_ADD) << 4)
 #define READ_DS_COPIED (REG(ds) == DPMI_private_data_segment+DPMI_private_paragraphs)
 
-#define MAX_DOS_PATH 128
+#define MAX_DOS_PATH 260
 
 /* We use static varialbes because DOS in non-reentrant, but maybe a */
 /* better way? */
@@ -211,11 +211,13 @@ int msdos_pre_extender(struct sigcontext_struct *scp, int intr)
 		    _es = DPMI_CLIENT.DPMI_SEL;
 		    _edi = DPMI_OFF + HLT_OFF(DPMI_VXD_APM);
 		    break;
+#if 0
 		case 0x27:
 		    D_printf("DPMI: VXDLDR VxD entry point requested\n");
 		    _es = DPMI_CLIENT.DPMI_SEL;
 		    _edi = DPMI_OFF + HLT_OFF(DPMI_VXD_VXDLDR);
 		    break;
+#endif
 		case 0x33:
 		    D_printf("DPMI: CONFIGMG VxD entry point requested\n");
 		    _es = DPMI_CLIENT.DPMI_SEL;
@@ -523,8 +525,8 @@ int msdos_pre_extender(struct sigcontext_struct *scp, int intr)
 		    REG(edx) = 0;
 		    p = (char *)GetSegmentBaseAddress(_ds) +
 			(DPMI_CLIENT.is_32 ? _edx : (_LWORD(edx)));
-		    snprintf((char *)(REG(ds)<<4), MAX_DOS_PATH, "%s", p);
-		    segment += strlen((char *)(REG(ds)>>4)) + 1;
+		    snprintf((char *)SEG2LINEAR(REG(ds)), MAX_DOS_PATH, "%s", p);
+		    segment += (MAX_DOS_PATH + 0x0f) >> 4;
                 } else {
                     REG(ds) = GetSegmentBaseAddress(_ds) >> 4;
 		}
@@ -568,9 +570,13 @@ int msdos_pre_extender(struct sigcontext_struct *scp, int intr)
 		    *(unsigned short *)((REG(es)<<4)+LWORD(ebx)+4)
 			= GetSegmentBaseAddress(sel)>>4;
 
-		/* make tow FCB\'s zero */
-		*(unsigned long *)((REG(es)<<4)+LWORD(ebx)+6) = 0;
-		*(unsigned long *)((REG(es)<<4)+LWORD(ebx)+0xA) = 0;
+		/* set the FCB pointers to something reasonable */
+		WRITE_WORD(SEGOFF2LINEAR(REG(es), LWORD(ebx)+6), 0);
+		WRITE_WORD(SEGOFF2LINEAR(REG(es), LWORD(ebx)+8), segment);
+		WRITE_WORD(SEGOFF2LINEAR(REG(es), LWORD(ebx)+0xA), 0);
+		WRITE_WORD(SEGOFF2LINEAR(REG(es), LWORD(ebx)+0xC), segment);
+		memset((void *)SEG2LINEAR(segment), 0, 0x30);
+		segment += 3;
 	    }
 	    /* then the enviroment seg */
 	    if (DPMI_CLIENT.CURRENT_ENV_SEL)
