@@ -292,9 +292,17 @@
 
 #if CONFIG_X_SELECTION
 #define SEL_ACTIVE(w) (visible_selection && ((w) >= sel_start) && ((w) <= sel_end))
+static inline Bit8u sel_attr(Bit8u a)
+{
+  /* adapted from Linux vgacon code */
+  if (vga.mode_type == TEXT_MONO)
+    a ^= ((a & 0x07) == 0x01) ? 0x70 : 0x77;
+  else
+    a = (a & 0x88) | ((a & 0x70) >> 4) | ((a & 0x07) << 4);
+  return a;
+}
 #define SEL_ATTR(attr) (((attr) >> 4) ? (attr) :(((attr) & 0x0f) << 4))
-/* #define SEL_ATTR(attr) ((((attr) >> 4) & 0x0f) + (((attr) << 4) & 0xf0)) */
-#define XATTR(w) (SEL_ACTIVE(w) ? SEL_ATTR(ATTR(w)) : ATTR(w))
+#define XATTR(w) (SEL_ACTIVE(w) ? sel_attr(ATTR(w)) : ATTR(w))
 #else
 #define XATTR(w) (ATTR(w))
 #endif
@@ -453,9 +461,17 @@ static int blink_count = 8;
 static int sel_start_row = -1, sel_end_row = -1, sel_start_col, sel_end_col;
 static unsigned short *sel_start = NULL, *sel_end = NULL;
 static u_char *sel_text = NULL;
-static Atom compound_text_atom = None;
-static Atom utf8_text_atom = None;
-static Atom text_atom = None;
+static Time sel_time;
+enum {
+  TARGETS_ATOM,
+  TIMESTAMP_ATOM,
+  COMPOUND_TARGET,
+  UTF8_TARGET,
+  TEXT_TARGET,
+  STRING_TARGET,
+  NUM_TARGETS
+};
+static Atom targets[NUM_TARGETS];
 static Boolean doing_selection = FALSE, visible_selection = FALSE;
 #endif
 
@@ -844,9 +860,12 @@ int X_init()
   }
 #if CONFIG_X_SELECTION
   /* Get atom for COMPOUND_TEXT/UTF8/TEXT type. */
-  compound_text_atom = XInternAtom(display, "COMPOUND_TEXT", False);
-  utf8_text_atom = XInternAtom(display, "UTF8_STRING", False);
-  text_atom = XInternAtom(display, "TEXT", False);
+  targets[TARGETS_ATOM] = XInternAtom(display, "TARGETS", False);
+  targets[TIMESTAMP_ATOM] = XInternAtom(display, "TIMESTAMP", False);
+  targets[COMPOUND_TARGET] = XInternAtom(display, "COMPOUND_TEXT", False);
+  targets[UTF8_TARGET] = XInternAtom(display, "UTF8_STRING", False);
+  targets[TEXT_TARGET] = XInternAtom(display, "TEXT", False);
+  targets[STRING_TARGET] = XA_STRING;
 #endif
   /* Delete-Window-Message black magic copied from xloadimage. */
   proto_atom  = XInternAtom(display, "WM_PROTOCOLS", False);
@@ -1558,7 +1577,7 @@ static void toggle_fullscreen_mode(void)
       }
       force_grab = 1;
     }
-    X_vidmode(w_x_res, w_y_res, &resize_width, &resize_height);
+    X_vidmode(x_res, y_res, &resize_width, &resize_height);
     mainwindow = fullscreenwindow;
     gc = fullscreengc;
     XCopyGC(display, normalgc, -1, gc);
@@ -1842,6 +1861,7 @@ void X_handle_events()
 	    case Button1 :
 	    case Button3 : 
 	      end_selection();
+              sel_time = e.xbutton.time;
 	      break;
 	    case Button2 :
 	      X_printf("X: mouse Button2Release\n");
@@ -2475,7 +2495,7 @@ static void lock_window_size(unsigned wx_res, unsigned wy_res)
   x_fill = w_x_res;
   y_fill = w_y_res;
   if (mainwindow == fullscreenwindow)
-    X_vidmode(w_x_res, w_y_res, &x_fill, &y_fill);
+    X_vidmode(x_res, y_res, &x_fill, &y_fill);
 
   XResizeWindow(display, mainwindow, x_fill, y_fill);
   X_printf("Resizing our window to %dx%d image\n", x_fill, y_fill);
@@ -2889,8 +2909,8 @@ static void X_vidmode(int w, int h, int *new_width, int *new_height)
     for (i=0; i<modecount; i++) {
       if ((vidmode_modes[i]->hdisplay >= w) && 
           (vidmode_modes[i]->vdisplay >= h) &&
-          (vidmode_modes[i]->hdisplay < nw) &&
-          (vidmode_modes[i]->vdisplay < nh)) {
+          (vidmode_modes[i]->hdisplay <= nw) &&
+          (vidmode_modes[i]->vdisplay <= nh)) {
         nw = vidmode_modes[i]->hdisplay;
         nh = vidmode_modes[i]->vdisplay;
         j = i;
@@ -3552,6 +3572,10 @@ void draw_cursor(int x, int y)
   /* no hardware cursor emulation in graphics modes (erik@sjoerd) */
   if(vga.mode_class == GRAPH) return;
 
+  /* don't draw it if it's out of bounds */
+  if(cursor_row < 0 || cursor_row >= li) return;
+  if(cursor_col < 0 || cursor_col >= co) return;
+
   set_gc_attr(XATTR(screen_adr + y * co + x));
   if(!have_focus) {
     XDrawRectangle(
@@ -3660,17 +3684,20 @@ inline void restore_cell(int x, int y)
   Bit16u *sp, *oldsp;
   u_char c;
 
+  /* no hardware cursor emulation in graphics modes (erik@sjoerd) */
+  if(vga.mode_class == GRAPH) return;
+
   if (font == NULL) {
     li = vga.text_height;
     co = vga.scan_len / 2;
   }
   
+  /* don't draw it if it's out of bounds */
+  if(y < 0 || y >= li || x < 0 || x >= co) return;
+
   sp = screen_adr + y * co + x;
   oldsp = prev_screen + y * co + x;
   c = XCHAR(sp);
-
-  /* no hardware cursor emulation in graphics modes (erik@sjoerd) */
-  if(vga.mode_class == GRAPH) return;
 
   *oldsp = XREAD_WORD(sp);
   X_draw_string(x, y, &c, 1, XATTR(sp));
@@ -4052,7 +4079,7 @@ void save_selection_data()
     return;
     
   /* Inform the X server. */
-  XSetSelectionOwner(display, XA_PRIMARY, mainwindow, CurrentTime);
+  XSetSelectionOwner(display, XA_PRIMARY, mainwindow, sel_time);
   if (XGetSelectionOwner(display, XA_PRIMARY) != mainwindow)
   {
     X_printf("X: Couldn't get primary selection!\n");
@@ -4089,26 +4116,42 @@ void send_selection(Time time, Window requestor, Atom target, Atom property)
 	e.xselection.selection = XA_PRIMARY;
 	e.xselection.requestor = requestor;
 	e.xselection.time = time;
+	e.xselection.serial = 0;
+	e.xselection.send_event = True;
+	e.xselection.target = target;
+	e.xselection.property = property;
+
 	if (sel_text == NULL) {
 		X_printf("X: Window 0x%lx requested selection, but it's empty!\n",   
 			(unsigned long) requestor);
 		e.xselection.property = None;
 	}
-	else if ((target == XA_STRING) || (target == compound_text_atom) ||
-		 (target == utf8_text_atom) || (target == text_atom)) {
+	else if (target == targets[TARGETS_ATOM]) {
+		X_printf("X: selection: TARGETS\n");
+		XChangeProperty(display, requestor, property, XA_ATOM, 32,
+				PropModeReplace, (char *)targets, NUM_TARGETS);
+	}
+	else if (target == targets[TIMESTAMP_ATOM]) {
+		X_printf("X: timestamp atom %lu\n", sel_time);
+		XChangeProperty(display, requestor, property, XA_INTEGER, 32,
+				PropModeReplace, (char *)&sel_time, 1);
+	}
+	else if (target == targets[STRING_TARGET] ||
+		 target == targets[COMPOUND_TARGET] ||
+		 target == targets[UTF8_TARGET] ||
+		 target == targets[TEXT_TARGET]) {
 		X_printf("X: selection: %s\n",sel_text);
-		e.xselection.target = target;
 		XChangeProperty(display, requestor, property, target, 8, PropModeReplace, 
 			sel_text, strlen(sel_text));
-		e.xselection.property = property;
 		X_printf("X: Selection sent to window 0x%lx as %s\n", 
 			(unsigned long) requestor, XGetAtomName(display, target));
 	}
 	else
 	{
 		e.xselection.property = None;
-		X_printf("X: Window 0x%lx requested unknown selection format %ld\n",
-			(unsigned long) requestor, (unsigned long) target);
+		X_printf("X: Window 0x%lx requested unknown selection format %ld %s\n",
+			 (unsigned long) requestor, (unsigned long) target,
+			 XGetAtomName(display, target));
 	}
 	XSendEvent(display, requestor, False, 0, &e);
 }
