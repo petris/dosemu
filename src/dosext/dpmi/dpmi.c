@@ -2794,8 +2794,8 @@ static void do_cpu_exception(struct sigcontext_struct *scp)
   }
 #endif
 
-  D_printf("DPMI: do_cpu_exception(0x%02lx) at %#x:%#x\n",_trapno,
-  	(int)_cs, (int)_eip);
+  D_printf("DPMI: do_cpu_exception(0x%02lx) at %#x:%#lx, cr2=%#lx, err=%#lx\n",
+	_trapno, _cs, _eip, _cr2, _err);
 #if 0
   if (_trapno == 0xe) {
       set_debug_level('M', 9);
@@ -2939,7 +2939,7 @@ void dpmi_fault(struct sigcontext_struct *scp)
 #endif
 {
 
-#define LWORD32(x,y) {if (DPMI_CLIENT.is_32) (unsigned long) _##x y; else _LWORD(x) y;}
+#define LWORD32(x,y) {if (DPMI_CLIENT.is_32) _##x y; else _LWORD(x) y;}
 #define _LWECX	   (DPMI_CLIENT.is_32 ^ prefix67 ? _ecx : _LWORD(ecx))
 #define set_LWECX(x) {if (DPMI_CLIENT.is_32 ^ prefix67) _ecx=(x); else _LWORD(ecx) = (x);}
 
