@@ -151,17 +151,15 @@ pkt_init(int vec)
 	break;
 
       case VNET_TYPE_TAP:
+        strcpy(devname, TAP_DEVICE);
         if (strncmp(config.netdev, TAP_DEVICE, 3) == 0) {
           pd_printf("PKT: trying to bind to device %s\n", config.netdev);
           strcpy(devname, config.netdev);
-          pkt_fd = tun_alloc(devname);
         }
+        pkt_fd = tun_alloc(devname);
         if (pkt_fd < 0) {
-          strcpy(devname, TAP_DEVICE);
-          if ((pkt_fd = tun_alloc(devname)) < 0) {
-            error("Cannot allocate TAP device\n");
-            goto fail;
-          }
+          error("Cannot allocate TAP device %s\n", devname);
+          goto fail;
         }
 	max_pkt_fd = pkt_fd + 1;
 	add_to_io_select(pkt_fd, 1, pkt_receive_async);
@@ -658,7 +656,6 @@ pkt_check_receive(int timeout)
 {
     int size,handle, fd;
     struct per_handle *hdlp;
-    char *p;
     struct timeval tv;
     fd_set readset;
     char device[32];
@@ -707,8 +704,6 @@ pkt_check_receive(int timeout)
 
 	hdlp = &pg.handle[handle];
 	if (hdlp->in_use) {
-	    printbuf("received packet:", (struct ethhdr *)pkt_buf); 
-
             /* VINOD: If it is broadcast type, translate it back ... */
 	    if (config.vnet == VNET_TYPE_DSN && memcmp(pkt_buf, DOSNET_BROADCAST_ADDRESS, 4) == 0) {
 		pd_printf("It is a broadcast packet\n");
@@ -721,9 +716,10 @@ pkt_check_receive(int timeout)
 		printbuf("Translated:", (struct ethhdr *)pkt_buf); 
 	    }
 
-	    /* No need to check the type again. Also, for now, NOVELL_HACK
-	       is diabled... */
-	    if (0) {
+	    /* No need to hack the incoming packets it seems. */
+#if 0
+	    if (pg.flags & FLAG_NOVELL)	{ /* Novell hack? */
+		char *p;
 		/* check if the packet's type matches the specified type */
 		/* in the ACCESS_TYPE call.  the position depends on the */
 		/* driver class! */
@@ -733,17 +729,14 @@ pkt_check_receive(int timeout)
 		else
 		    p = pkt_buf + 2 * ETH_ALEN + 2;	/* IEEE 802.3 */
 
-		if (size >= ((p - pkt_buf) + hdlp->packet_type_len) &&
-		    !memcmp(p,hdlp->packet_type,hdlp->packet_type_len)) {
-                }
-		if (hdlp->flags & FLAG_NOVELL) {	/* Novell hack? */
-		    *--p = (char)ETH_P_IPX; /* overwrite length with type */
-		    *--p = (char)(ETH_P_IPX >> 8);
-		}
+		*--p = (char)ETH_P_IPX; /* overwrite length with type */
+		*--p = (char)(ETH_P_IPX >> 8);
 	    }
+#endif
 	    p_stats->packets_in++;
 	    p_stats->bytes_in += size;
 
+	    printbuf("received packet:", (struct ethhdr *)pkt_buf); 
 	    /* stuff things in global vars and queue a hardware */
 	    /* interrupt which will perform the upcall */
 
