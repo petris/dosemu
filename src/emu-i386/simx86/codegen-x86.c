@@ -1187,7 +1187,8 @@ shrot0:
 			// andl StackMask(%%ebx),%%ecx
 			0x23,0x4b,Ofs_STACKM,
 			// movw %%ax,(%%esi,%%ecx,1)
-			0x66,0x89,0x04,0x0e,
+			//0x66,0x89,0x04,0x0e,
+			0xff,0x53,Ofs_stub_stk_16,0x90,
 			// do 16-bit PM apps exist which use a 32-bit stack seg?
 			// movl %%ecx,Ofs_ESP(%%ebx)
 			0x89,0x4b,Ofs_ESP
@@ -1202,7 +1203,8 @@ shrot0:
 			// andl StackMask(%%ebx),%%ecx
 			0x23,0x4b,Ofs_STACKM,
 			// movl %%eax,(%%esi,%%ecx,1)
-			0x89,0x04,0x0e,
+			//0x89,0x04,0x0e,
+			0xff,0x53,Ofs_stub_stk_32,
 #if 0	/* keep high 16-bits of ESP in small-stack mode */
 			// movl StackMask(%%ebx),%%edx
 			0x8b,0x53,Ofs_STACKM,
@@ -1242,7 +1244,8 @@ shrot0:
 			// andl StackMask(%%ebx),%%ecx
 			0x23,0x4b,Ofs_STACKM,
 			// movw %%ax,(%%esi,%%ecx,1)
-			0x66,0x89,0x04,0x0e,
+			//0x66,0x89,0x04,0x0e,
+			0xff,0x53,Ofs_stub_stk_16,0x90,
 		};
 		static unsigned char pseq32[] = {
 			// movl offs(%%ebx),%%eax
@@ -1252,7 +1255,8 @@ shrot0:
 			// andl StackMask(%%ebx),%%ecx
 			0x23,0x4b,Ofs_STACKM,
 			// movl %%eax,(%%esi,%%ecx,1)
-			0x89,0x04,0x0e,
+			//0x89,0x04,0x0e,
+			0xff,0x53,Ofs_stub_stk_32,
 		};
 		register unsigned char *p, *q; int sz;
 		if (mode&DATA16) p=pseq16,sz=sizeof(pseq16);
@@ -1317,10 +1321,12 @@ shrot0:
 		}
 		if (mode&DATA16) {
 			// movw %%ax,(%%esi,%%ecx,1)
-			G4M(0x66,0x89,0x04,0x0e,Cp);
+			//G4M(0x66,0x89,0x04,0x0e,Cp);
+			G4M(0xff,0x53,Ofs_stub_stk_16,NOP,Cp);
 		} else {
 			// movl %%eax,(%%esi,%%ecx,1)
-			G4M(0x89,0x04,0x0e,NOP,Cp);
+			//G4M(0x89,0x04,0x0e,NOP,Cp);
+			G4M(0xff,0x53,Ofs_stub_stk_32,NOP,Cp);
 		}
 		/* nop to make space for a code patch */
 		G1(NOP, Cp);
@@ -1339,7 +1345,8 @@ shrot0:
 			// andl StackMask(%%ebx),%%ecx
 			0x23,0x4b,Ofs_STACKM,
 			// movw %%ax,(%%esi,%%ecx,1)
-			0x66,0x89,0x04,0x0e,
+			//0x66,0x89,0x04,0x0e,
+			0xff,0x53,Ofs_stub_stk_16,0x90,
 			// movl %%ecx,Ofs_ESP(%%ebx)
 			0x89,0x4b,Ofs_ESP
 		};
@@ -1355,7 +1362,8 @@ shrot0:
 			// andl StackMask(%%ebx),%%ecx
 			0x23,0x4b,Ofs_STACKM,
 			// movl %%eax,(%%esi,%%ecx,1)
-			0x89,0x04,0x0e,
+			//0x89,0x04,0x0e,
+			0xff,0x53,Ofs_stub_stk_32,
 			// movl %%ecx,Ofs_ESP(%%ebx)
 			0x89,0x4b,Ofs_ESP
 		};
@@ -1849,7 +1857,7 @@ shrot0:
 
 	case O_MOVS_MovD:
 		GetDF(Cp);
-		if (mode&(MREP|MREPNE))	{ G3M(NOP,NOP,REP,Cp); }
+		if (mode&(MREP|MREPNE))	{ G3M(0xff,0x13,REP,Cp); }
 		if (mode&MBYTE)	{ G1(MOVSb,Cp); }
 		else {
 			Gen66(mode,Cp);
@@ -1870,7 +1878,7 @@ shrot0:
 		break;
 	case O_MOVS_StoD:
 		GetDF(Cp);
-		if (mode&(MREP|MREPNE))	{ G3M(NOP,NOP,REP,Cp); }
+		if (mode&(MREP|MREPNE))	{ G3M(0xff,0x13,REP,Cp); }
 		if (mode&MBYTE)	{ G1(STOSb,Cp); }
 		else {
 			Gen66(mode,Cp);
@@ -2175,7 +2183,8 @@ shrot0:
 			// andl StackMask(%%ebx),%%ecx
 			0x23,0x4b,Ofs_STACKM,
 			// movw %%ax,(%%esi,%%ecx,1)
-			0x66,0x89,0x04,0x0e,
+			//0x66,0x89,0x04,0x0e,
+			0xff,0x53,Ofs_stub_stk_16,0x90,
 			// movl %%ecx,Ofs_ESP(%%ebx)
 			0x89,0x4b,Ofs_ESP
 		};
@@ -2191,7 +2200,8 @@ shrot0:
 			// andl StackMask(%%ebx),%%ecx
 			0x23,0x4b,Ofs_STACKM,
 			// movl %%eax,(%%esi,%%ecx,1)
-			0x89,0x04,0x0e,
+			//0x89,0x04,0x0e,
+			0xff,0x53,Ofs_stub_stk_32,
 			// movl %%ecx,Ofs_ESP(%%ebx)
 			0x89,0x4b,Ofs_ESP
 		};
@@ -3141,7 +3151,6 @@ static unsigned int CloseAndExec_x86(unsigned int PC, int mode, int ln)
 	 * if some other code tries to write over the page including
 	 * this node */
 	e_markpage(G->seqbase, G->seqlen);
-	e_mprotect(G->seqbase, G->seqlen);
 	return Exec_x86(G, ln);
 }
 

@@ -52,7 +52,6 @@
 typedef struct _mpmap {
 	struct _mpmap *next;
 	int mega;
-	unsigned char pagemap[32];	/* (32*8)=256 pages *4096 = 1M */
 	unsigned int subpage[0x100000>>(CGRAN+5)];	/* 16-byte granularity, 64k bits */
 } tMpMap;
 
@@ -80,9 +79,8 @@ static inline tMpMap *FindM(unsigned int addr)
 }
 
 
-static int AddMpMap(unsigned int addr, unsigned int aend, int onoff)
+static void AddMpMap(unsigned int addr, unsigned int aend)
 {
-	int bs=0, bp=0;
 	register int page;
 	tMpMap *M;
 
@@ -98,50 +96,11 @@ static int AddMpMap(unsigned int addr, unsigned int aend, int onoff)
 		M->next = MpH; MpH = M;
 		M->mega = (page>>8);
 	    }
-	    if (bp < 32) {
-		bs |= (((onoff? set_bit(page&255, M->pagemap) :
-			    clear_bit(page&255, M->pagemap)) & 1) << bp);
-		bp++;
-	    }
 	    if (debug_level('e')>1) {
 		if (addr > mMaxMem) mMaxMem = addr;
-		if (onoff)
-		  dbug_printf("MPMAP:   protect page=%08x was %x\n",addr,bs);
-		else
-		  dbug_printf("MPMAP: unprotect page=%08x was %x\n",addr,bs);
 	    }
 	    addr += PAGE_SIZE;
 	} while (addr < aend);
-	return bs;
-}
-
-
-static inline int e_querymprot(unsigned int addr)
-{
-	register int a2 = addr >> PAGE_SHIFT;
-	tMpMap *M = FindM(addr);
-
-	if (M==NULL) return 0;
-	return test_bit(a2&255, M->pagemap);
-}
-
-int e_querymprotrange(unsigned int al, unsigned int ah)
-{
-	int a2l, a2h, res = 0;
-	tMpMap *M = FindM(al);
-
-	a2l = al >> PAGE_SHIFT;
-	a2h = ah >> PAGE_SHIFT;
-
-	while (M && a2l <= a2h) {
-		res = (res<<1) | (test_bit(a2l&255, M->pagemap) & 1);
-		a2l++;
-		if ((a2l&255)==0 && a2l <= a2h) {
-			M = M->next;
-			res = 0;
-		}
-	}
-	return res;
 }
 
 
@@ -151,9 +110,13 @@ int e_querymprotrange(unsigned int al, unsigned int ah)
 int e_markpage(unsigned int addr, size_t len)
 {
 	unsigned int abeg, aend;
-	tMpMap *M = FindM(addr);
+	tMpMap *M;
 
-	if (M == NULL) return 0;
+	if (M == NULL) {
+		AddMpMap(addr, addr+len);
+		M = FindM(addr);
+		if (M == NULL) return 0;
+	}
 
 	abeg = addr >> CGRAN;
 	aend = (addr+len-1) >> CGRAN;
@@ -222,188 +185,18 @@ void e_resetpagemarks(unsigned int addr, size_t len)
 
 /////////////////////////////////////////////////////////////////////////////
 
-
-int e_mprotect(unsigned int addr, size_t len)
-{
-	int e;
-	unsigned int abeg, aend;
-	unsigned int abeg1 = (unsigned)-1;
-	unsigned a;
-	int ret = 1;
-
-	abeg = addr & PAGE_MASK;
-	if (len==0) {
-	    aend = abeg + PAGE_SIZE;
-	}
-	else {
-	    aend = ((addr+len-1) & PAGE_MASK) + PAGE_SIZE;
-	}
-	/* only protect ranges that were not already protected by e_mprotect */
-	for (a = abeg; a <= aend; a += PAGE_SIZE) {
-	    if (a < aend && !e_querymprot(a)) {
-		if (abeg1 == (unsigned)-1)
-		    abeg1 = a;
-	    } else if (abeg1 != (unsigned)-1) {
-		e = mprotect(&mem_base[abeg1], a-abeg1, PROT_READ|PROT_EXEC);
-		if (e<0) {
-		    e_printf("MPMAP: %s\n",strerror(errno));
-		    return -1;
-		}
-		ret = AddMpMap(abeg1, a, 1);
-		abeg1 = (unsigned)-1;
-	    }
-	}
-	return ret;
-}
-
-int e_munprotect(unsigned int addr, size_t len)
-{
-	int e;
-	unsigned int abeg, aend;
-	unsigned int abeg1 = (unsigned)-1;
-	unsigned a;
-	int ret = 0;
-
-	abeg = addr & PAGE_MASK;
-	if (len==0) {
-	    aend = abeg + PAGE_SIZE;
-	}
-	else {
-	    aend = ((addr+len-1) & PAGE_MASK) + PAGE_SIZE;
-	}
-	/* only unprotect ranges that were protected by e_mprotect */
-	for (a = abeg; a <= aend; a += PAGE_SIZE) {
-	    if (a < aend && e_querymprot(a)) {
-		if (abeg1 == (unsigned)-1)
-		    abeg1 = a;
-	    } else if (abeg1 != (unsigned)-1) {
-		e = mprotect(&mem_base[abeg1], a-abeg1,
-			     PROT_READ|PROT_WRITE|PROT_EXEC);
-		if (e<0) {
-		    e_printf("MPUNMAP: %s\n",strerror(errno));
-		    return -1;
-		}
-		ret = AddMpMap(abeg1, a, 0);
-		abeg1 = (unsigned)-1;
-	    }
-	}
-	return ret;
-}
-
-/* check if the address is aliased to a non protected page, and if it is,
-   do not try to unprotect it */
-int e_check_munprotect(unsigned int addr)
-{
-	if (LINEAR2UNIX(addr) != &mem_base[addr])
-		return 0;
-	return e_munprotect(addr,0);
-}
-
-
-#ifdef HOST_ARCH_X86
-int e_handle_pagefault(struct sigcontext_struct *scp)
-{
-	int codehit;
-	register int v;
-	unsigned char *p;
-	unsigned int addr = _cr2 - TheCPU.mem_base;
-
-	/* _err:
-	 * bit 0 = 1	page protect
-	 * bit 1 = 1	writing
-	 * bit 2 = 1	user mode
-	 * bit 3 = 0	no reserved bit err
-	 */
-	if (!e_querymprot(addr) || (_err&0x0f) != 0x07) return 0;
-
-	/* Got a fault in a write-protected memory page, that is,
-	 * a page _containing_code_. 99% of the time we are
-	 * hitting data or stack in the same page, NOT code.
-	 *
-	 * We check using e_querymprot whether we protected the
-	 * page ourselves. Additionally an error code of 7 should
-	 * have been given.
-	 *
-	 * _cr2 keeps the address where the code tries to write
-	 * _rip keeps the address of the faulting instruction
-	 *	(in the code buffer or in the tree)
-	 *
-	 * Possible instructions we'll find here are (see sigsegv.v):
-	 *	8807	movb	%%al,(%%edi)
-	 *	(66)8907	mov{wl}	%%{e}ax,(%%edi)
-	 *	(f3)(66)a4,a5	movs
-	 *	(f3)(66)aa,ab	stos
-	 */
-#ifdef PROFILE
-	if (debug_level('e')) PageFaults++;
-#endif
-	if (DPMIValidSelector(_cs))
-		p = (unsigned char *) SEL_ADR(_cs, _rip);
-	else
-		p = (unsigned char *) _rip;
-	if (debug_level('e')>1 || (!InCompiledCode && !DPMIValidSelector(_cs))) {
-		v = *((int *)p);
-		__asm__("bswap %0" : "=r" (v) : "0" (v));
-		e_printf("Faulting ops: %08x\n",v);
-
-		if (!InCompiledCode) {
-			dbug_printf("*\tFault out of %scode, cs:eip=%x:%lx,"
-				    " cr2=%x, fault_cnt=%d\n",
-				    !DPMIValidSelector(_cs) ? "DOSEMU " : "",
-				    _cs, _rip, addr, fault_cnt);
-		}
-		if (e_querymark(addr, 1)) {
-			e_printf("CODE node hit at %08x\n",addr);
-		}
-		else if (InCompiledCode) {
-			e_printf("DATA node hit at %08x\n",addr);
-		}
-	}
-	/* the page is not unprotected here, the code
-	 * linked by Cpatch will do it */
-	/* ACH: we can set up a data patch for code
-	 * which has not yet been executed! */
-	if (InCompiledCode && !e_querymark(addr, 1) && Cpatch(scp))
-		return 1;
-	/* We HAVE to invalidate all the code in the page
-	 * if the page is going to be unprotected */
-	codehit = 0;
-	InvalidateNodePage(addr, 0, p, &codehit);
-	e_resetpagemarks(addr, 1);
-	e_munprotect(addr, 0);
-	/* now go back and perform the faulting op */
-	return 1;
-}
-#endif
-
-/////////////////////////////////////////////////////////////////////////////
-
 void mprot_init(void)
 {
 	MpH = NULL;
-	AddMpMap(0,0,0);	/* first mega in first entry */
+	AddMpMap(0,0);	/* first mega in first entry */
 }
 
 void mprot_end(void)
 {
 	tMpMap *M = MpH;
-	int i;
-	unsigned char b;
 
 	while (M) {
 	    tMpMap *M2 = M;
-	    for (i=0; i<32; i++) if ((b=M->pagemap[i])) {
-		unsigned int addr = (M->mega<<20) | (i<<15);
-		while (b) {
-		    if (b & 1) {
-			if (debug_level('e')>1)
-			    dbug_printf("MP_END %08x = RWX\n",addr);
-			(void)mprotect(&mem_base[addr], PAGE_SIZE, PROT_READ|PROT_WRITE|PROT_EXEC);
-		    }
-		    addr += PAGE_SIZE;
-	 	    b >>= 1;
-		}
-	    }
 	    M = M->next;
 	    free(M2);
 	}

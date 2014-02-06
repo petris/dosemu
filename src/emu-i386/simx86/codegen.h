@@ -226,15 +226,12 @@ static __inline__ void PUSH(int m, void *w)
 {
 	unsigned int sp;
 	unsigned int addr;
-	int v;
 	sp = (TheCPU.esp-BT24(BitDATA16, m)) & TheCPU.StackMask;
 	addr = LONG_SS + sp;
-	v = e_check_munprotect(addr);
 	if (m&DATA16)
 		WRITE_WORD(addr, *(short *)w);
 	else
 		WRITE_DWORD(addr, *(int *)w);
-	if (v) e_mprotect(addr, 0);
 #ifdef KEEP_ESP
 	TheCPU.esp = (sp&TheCPU.StackMask) | (TheCPU.esp&~TheCPU.StackMask);
 #else
@@ -314,8 +311,6 @@ extern char OpSize[];
 
 #define OPSIZE(m) (OpSize[(m)&(DATA16|MBYTE)])
 
-int Cpatch(struct sigcontext_struct *scp);
-int UnCpatch(unsigned char *eip);
 void stub_rep(void) asm ("stub_rep__");
 void stub_stk_16(void) asm ("stub_stk_16__");
 void stub_stk_32(void) asm ("stub_stk_32__");

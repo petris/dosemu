@@ -534,11 +534,6 @@ int e_emu_fault(struct sigcontext_struct *scp)
 	    return_addr = P0;
 	    Cpu2Reg();
 	}
-
-#ifdef HOST_ARCH_X86
-	if (!CONFIG_CPUSIM && e_handle_pagefault(scp))
-		return 1;
-#endif
   }
 
 #ifdef HOST_ARCH_X86

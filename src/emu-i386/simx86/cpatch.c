@@ -42,57 +42,29 @@
 #define asmlinkage static __attribute__((used))
 #endif
 
-int s_munprotect(unsigned int addr)
-{
-	if (debug_level('e')>3) e_printf("\tS_MUNPROT %08x\n",addr);
-	return e_check_munprotect(addr);
-}
-
-int s_mprotect(unsigned int addr)
-{
-	if (debug_level('e')>3) e_printf("\tS_MPROT   %08x\n",addr);
-	return e_mprotect(addr,0);
-}
-
 #ifdef HOST_ARCH_X86
-
-static int m_mprotect(unsigned int addr)
-{
-	if (debug_level('e')>3)
-	    e_printf("\tM_MPROT   %08x\n",addr);
-	return e_mprotect(addr,0);
-}
 
 /*
  * Return address of the stub function is passed into eip
  */
-static int m_munprotect(unsigned int addr, unsigned int len, unsigned char *eip)
+static void m_munprotect(unsigned int addr, unsigned int len, unsigned char *eip)
 {
-	if (debug_level('e')>3) e_printf("\tM_MUNPROT %08x:%p [%08x]\n",
-		addr,eip,*((int *)(eip-3)));
-	/* verify that data, not code, has been hit */
-	if (!e_querymark(addr, len))
-	    return e_check_munprotect(addr);
 	/* Oops.. we hit code, maybe the stub was set up before that
 	 * code was parsed. Ok, undo the patch and clear that code */
 	if (debug_level('e')>1)
 	    e_printf("CODE %08x hit in DATA %p patch\n",addr,eip);
-/*	if (UnCpatch((void *)(eip-3))) leavedos(0); */
-	InvalidateSingleNode(addr, eip);
-	return e_check_munprotect(addr);
+	InvalidateNodePage(addr,len,eip,NULL);
+	e_resetpagemarks(addr,len);
 }
 
 static void r_munprotect(unsigned int addr, unsigned int len, unsigned char *eip)
 {
 	if (EFLAGS & EFLAGS_DF) addr -= len;
-	if (debug_level('e')>3)
+	if (debug_level('e')>1)
 	    dbug_printf("\tR_MUNPROT %08x:%08x %s\n",
 		addr,addr+len,(EFLAGS&EFLAGS_DF?"back":"fwd"));
-	if (LINEAR2UNIX(addr) != &mem_base[addr] && !e_querymark(addr, len))
-		return;
 	InvalidateNodePage(addr,len,eip,NULL);
 	e_resetpagemarks(addr,len);
-	e_munprotect(addr,len);
 }
 
 #define repmovs(std,letter,cld)			       \
@@ -137,7 +109,8 @@ asmlinkage void rep_movs_stos(struct rep_stack *stack)
 	}
 	else if (*eip & 1)
 		len *= 4;
-	r_munprotect(addr, len, eip);
+	if (e_querymark(addr, len))
+		r_munprotect(addr, len, eip);
 	edi = LINEAR2UNIX(addr);
 	if ((op & 0xfe) == 0xa4) { /* movs */
 		unsigned int source = stack->esi - mem_base;
@@ -181,61 +154,32 @@ asmlinkage void rep_movs_stos(struct rep_stack *stack)
 
 /* ======================================================================= */
 
-asmlinkage void stk_16(unsigned char *paddr, Bit16u value)
-{
-	unsigned int addr = paddr - mem_base;
-	int ret = s_munprotect(addr);
-	WRITE_WORD(addr, value);
-	if (ret & 1)
-		s_mprotect(addr);
-}
-
-asmlinkage void stk_32(unsigned char *paddr, Bit32u value)
-{
-	unsigned int addr = paddr - mem_base;
-	int ret = s_munprotect(addr);
-	WRITE_DWORD(addr, value);
-	if (ret & 1)
-		s_mprotect(addr);
-}
-
 asmlinkage void wri_8(unsigned char *paddr, Bit8u value, unsigned char *eip)
 {
 	unsigned int addr = paddr - mem_base;
-	int ret;
-	Bit8u *p;
-	ret = m_munprotect(addr, 1, eip);
-	p = LINEAR2UNIX(addr);
+	/* check if code has been hit */
+	if (e_querymark(addr, 1))
+		m_munprotect(addr, 1, eip);
 	/* there is a slight chance that this stub hits VGA memory.
 	   For that case there is a simple instruction decoder but
 	   we must use mov %al,(%edi) (%rdi for x86_64) */
-	asm("movb %1,(%2)" : "=m"(*p) : "a"(value), "D"(p));
-	if (ret & 1)
-		m_mprotect(addr);
+	asm("movb %1,(%2)" : "=m"(*paddr) : "a"(value), "D"(paddr));
 }
 
 asmlinkage void wri_16(unsigned char *paddr, Bit16u value, unsigned char *eip)
 {
 	unsigned int addr = paddr - mem_base;
-	int ret;
-	Bit16u *p;
-	ret = m_munprotect(addr, 2, eip);
-	p = LINEAR2UNIX(addr);
-	asm("movw %1,(%2)" : "=m"(*p) : "a"(value), "D"(p));
-	if (ret & 1)
-		m_mprotect(addr);
+	if (e_querymark(addr, 2))
+		m_munprotect(addr, 2, eip);
+	asm("movw %1,(%2)" : "=m"(*paddr) : "a"(value), "D"(paddr));
 }
 
 asmlinkage void wri_32(unsigned char *paddr, Bit32u value, unsigned char *eip)
 {
 	unsigned int addr = paddr - mem_base;
-	int ret;
-	Bit32u *p;
-	ret = m_munprotect(addr, 4, eip);
-	p = LINEAR2UNIX(addr);
-	asm("movl %1,(%2)" : "=m"(*p) : "a"(value), "D"(p));
-	if (ret & 1)
-		m_mprotect(addr);
+	if (e_querymark(addr, 4))
+		m_munprotect(addr, 4, eip);
+	asm("movl %1,(%2)" : "=m"(*paddr) : "a"(value), "D"(paddr));
 }
 
 #ifdef __i386__
@@ -400,8 +344,8 @@ asm (
 
 asm (
 		".text\n"
-"stub_stk_16__:.globl stub_stk_16__\n"STUB_STK(stk_16)
-"stub_stk_32__:.globl stub_stk_32__\n"STUB_STK(stk_32)
+"stub_stk_16__:.globl stub_stk_16__\n"STUB_STK(wri_16)
+"stub_stk_32__:.globl stub_stk_32__\n"STUB_STK(wri_32)
 "stub_wri_8__: .globl stub_wri_8__\n "STUB_WRI(wri_8)
 "stub_wri_16__:.globl stub_wri_16__\n"STUB_WRI(wri_16)
 "stub_wri_32__:.globl stub_wri_32__\n"STUB_WRI(wri_32)
@@ -412,156 +356,6 @@ asm (
 "stub_stosw__: .globl stub_stosw__\n "STUB_STOS(wri_16,w)
 "stub_stosl__: .globl stub_stosl__\n "STUB_STOS(wri_32,l)
 );
-
-/* call N(%ebx) */
-#define JSRPATCH(p,N) *((short *)(p))=0x53ff;p[2]=N;
-#define JSRPATCHL(p,N) *((short *)(p))=0x93ff; *((int *)((p)+2))=N;
-
-/*
- * enters here only from a fault
- */
-int Cpatch(struct sigcontext_struct *scp)
-{
-    unsigned char *p;
-    int w16;
-    unsigned int v;
-    unsigned char *eip = (unsigned char *)_rip;
-
-    p = eip;
-    if (*p==0xf3 && p[-1] == 0x90 && p[-2] == 0x90) {	// rep movs, rep stos
-	if (debug_level('e')>1) e_printf("### REP movs/stos patch at %p\n",eip);
-	p-=2;
-	G2M(0xff,0x13,p); /* call (%ebx) */
-	_rip -= 2; /* make sure call (%ebx) is performed the first time */
-	return 1;
-    }
-
-    if (*p==0x66) w16=1,p++; else w16=0;
-    v = *((int *)p) & 0xffffff;
-    if (v==0x0e0489) {		// stack: never fail
-	// mov %%{e}ax,(%%esi,%%ecx,1)
-	// we have a sequence:	66 89 04 0e
-	//		or	89 04 0e
-	if (debug_level('e')>1) e_printf("### Stack patch at %p\n",eip);
-	if (w16) {
-	    p--; JSRPATCH(p,Ofs_stub_stk_16); p[3] = 0x90;
-	}
-	else {
-	    JSRPATCH(p,Ofs_stub_stk_32);
-	}
-	return 1;
-    }
-    if (v==0x900788) {		// movb %%al,(%%edi)
-	// we have a sequence:	88 07 90
-	if (debug_level('e')>1) e_printf("### Byte write patch at %p\n",eip);
-	JSRPATCH(p,Ofs_stub_wri_8);
-	return 1;
-    }
-    if ((v&0xffff)==0x0789) {	// mov %%{e}ax,(%%edi)
-	// we have a sequence:	89 07 90
-	//		or	66 89 07
-	if (debug_level('e')>1) e_printf("### Word/Long write patch at %p\n",eip);
-	if (w16) {
-	    p--; JSRPATCH(p,Ofs_stub_wri_16);
-	}
-	else {
-	    JSRPATCH(p,Ofs_stub_wri_32);
-	}
-	return 1;
-    }
-    if (v==0x9090a5) {	// movsw
-	if (debug_level('e')>1) e_printf("### movs{wl} patch at %p\n",eip);
-	if (w16) {
-	    p--; JSRPATCHL(p,Ofs_stub_movsw);
-	}
-	else {
-	    JSRPATCHL(p,Ofs_stub_movsl);
-	}
-	return 1;
-    }
-    if (v==0x9090a4) {	// movsb
-	if (debug_level('e')>1) e_printf("### movsb patch at %p\n",eip);
-	    JSRPATCHL(p,Ofs_stub_movsb);
-	return 1;
-    }
-    if (v==0x9090ab) {	// stosw
-	if (debug_level('e')>1) e_printf("### stos{wl} patch at %p\n",eip);
-	if (w16) {
-	    p--; JSRPATCHL(p,Ofs_stub_stosw);
-	}
-	else {
-	    JSRPATCHL(p,Ofs_stub_stosl);
-	}
-	return 1;
-    }
-    if (v==0x9090aa) {	// stosb
-	if (debug_level('e')>1) e_printf("### stosb patch at %p\n",eip);
-	JSRPATCHL(p,Ofs_stub_stosb);
-	return 1;
-    }
-    if (debug_level('e')>1) e_printf("### Patch unimplemented: %08x\n",*((int *)p));
-    return 0;
-}
-
-
-int UnCpatch(unsigned char *eip)
-{
-    register unsigned char *p;
-    p = eip;
-
-    if (*eip != 0xff) return 1;
-    e_printf("UnCpatch   at %p was %02x%02x%02x%02x%02x\n",eip,
-	eip[0],eip[1],eip[2],eip[3],eip[4]);
-
-    if (eip[1] == 0x93) {
-	int *p2 = (int *)(p+2);
-	if (*p2 == Ofs_stub_movsb) {
-	     // movsb; nop; nop; nop; nop; cld
-	     *((short *)p) = 0x90a4; *p2 = 0xfc909090;
-	}
-	else if (*p2 == Ofs_stub_movsw) {
-	     *((short *)p) = 0xa566; *p2 = 0x90909090;
-	}
-	else if (*p2 == Ofs_stub_movsl) {
-	     *((short *)p) = 0x90a5; *p2 = 0xfc909090;
-	}
-	else if (*p2 == Ofs_stub_stosb) {
-	     *((short *)p) = 0x90aa; *p2 = 0xfc909090;
-	}
-	else if (*p2 == Ofs_stub_stosw) {
-	     *((short *)p) = 0xab66; *p2 = 0x90909090;
-	}
-	else if (*p2 == Ofs_stub_stosl) {
-	     *((short *)p) = 0x90ab; *p2 = 0xfc909090;
-	}
-	else return 1;
-    }
-    else if (p[1] == 0x13) {
-	p[0] = p[1] = 0x90;
-    }
-    else if (p[1] == 0x53) {
-	if ((char)p[2] == Ofs_stub_wri_8) {
-	    *((short *)p) = 0x0788; p[2] = 0x90;
-	}
-	else if ((char)p[2] == Ofs_stub_wri_16) {
-	    *p++ = 0x66; *((short *)p) = 0x0789;
-	}
-	else if ((char)p[2] == Ofs_stub_wri_32) {
-	    *((short *)p) = 0x0789; p[2] = 0x90;
-	}
-	else if ((char)p[2] == Ofs_stub_stk_16) {
-	    *((int *)p) = 0x0e048966;
-	}
-	else if ((char)p[2] == Ofs_stub_stk_32) {
-	    *((short *)p) = 0x0489; p[2] = 0x0e;
-	}
-	else return 1;
-    }
-    else return 1;
-    e_printf("UnCpatched at %p  is %02x%02x%02x%02x%02x\n",eip,
-	eip[0],eip[1],eip[2],eip[3],eip[4]);
-    return 0;
-}
 
 #endif	//HOST_ARCH_X86
 

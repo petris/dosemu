@@ -56,8 +56,10 @@ extern unsigned int Exec_x86(TNode *G, int ln);
 
 /////////////////////////////////////////////////////////////////////////////
 
-#define STD_WRITE_B	G3M(0x88,0x07,0x90,Cp);
-#define STD_WRITE_WL(m)	G3((m)&DATA16?0x078966:0x900789,Cp)
+//#define STD_WRITE_B	G3M(0x88,0x07,0x90,Cp);
+//#define STD_WRITE_WL(m)	G3((m)&DATA16?0x078966:0x900789,Cp)
+#define STD_WRITE_B	G3M(0xff,0x53,Ofs_stub_wri_8,Cp);
+#define STD_WRITE_WL(m)	G3M(0xff,0x53,((m)&DATA16?Ofs_stub_wri_16:Ofs_stub_wri_32),Cp)
 
 #define GenAddECX(o)	if (((o) > -128) && ((o) < 128)) {\
 			G2(0xc183,Cp); G1((o),Cp); } else {\
