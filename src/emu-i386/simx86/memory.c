@@ -110,13 +110,9 @@ static void AddMpMap(unsigned int addr, unsigned int aend)
 int e_markpage(unsigned int addr, size_t len)
 {
 	unsigned int abeg, aend;
-	tMpMap *M;
+	tMpMap *M = FindM(addr);
 
-	if (M == NULL) {
-		AddMpMap(addr, addr+len);
-		M = FindM(addr);
-		if (M == NULL) return 0;
-	}
+	if (M == NULL) return 0;
 
 	abeg = addr >> CGRAN;
 	aend = (addr+len-1) >> CGRAN;
