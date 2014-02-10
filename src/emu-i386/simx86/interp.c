@@ -181,10 +181,10 @@ static unsigned int JumpGen(unsigned int P2, int mode, int cond,
 	/* jump address for not taken branch, usually next instruction */
 	j_nt = d_nt + LONG_CS;
 
+	P1 = P2 + pskip;
 	switch(cond) {
 	case 0x00 ... 0x0f:
 	case 0x31:
-		P1 = P2 + pskip;
 		/* is there a jump after the condition? if yes, simplify */
 #if !defined(SINGLESTEP)
 		if (!(EFLAGS & TF)) {
@@ -245,6 +245,10 @@ static unsigned int JumpGen(unsigned int P2, int mode, int cond,
 		    leavedos(0xebfe);
 		}
 #ifdef HOST_ARCH_X86
+		/* note: nojumps is disabled by default -- while it seems
+		   an easy optimization, it forces re-JITting of the code
+		   at the jmp's target, instead of using the node linker
+		   to see if there is already code there */
 #ifdef NOJUMPS
 #if !defined(SINGLESTEP)
 		if (!(EFLAGS & TF) && !CONFIG_CPUSIM &&
@@ -284,7 +288,7 @@ static unsigned int JumpGen(unsigned int P2, int mode, int cond,
 	/* we just generated a jump, so the returned eip (P1) is
 	 * (almost) always different from P2.
 	 */
-	P1 = CloseAndExec(P2, mode, __LINE__); NewNode=0;
+	P1 = CloseAndExec(P1, mode, __LINE__); NewNode=0;
 	return P1;
 }
 
@@ -294,7 +298,6 @@ static unsigned int JumpGen(unsigned int P2, int mode, int cond,
 #if !defined(SINGLESTEP)&&!defined(SINGLEBLOCK)&&defined(HOST_ARCH_X86)
 static inline unsigned int FindExecCode(unsigned int PC)
 {
-	unsigned int temp;
 	int mode = TheCPU.mode;
 	TNode *G;
 
@@ -304,8 +307,8 @@ static inline unsigned int FindExecCode(unsigned int PC)
 	 * any signal processing. Jumps are defined as
 	 * a 'descheduling point' for checking signals.
 	 */
-	temp = 100;	/* safety count */
-	while (temp && ((InterOps[Fetch(PC)]&1)==0) && (G=FindTree(PC))) {
+	while (!(CEmuStat & (CeS_TRAP|CeS_DRTRAP|CeS_SIGPEND|CeS_LOCK)) &&
+	       ((InterOps[Fetch(PC)]&1)==0) && (G=FindTree(PC))) {
 		if (debug_level('e')>2)
 			e_printf("** Found compiled code at %08x\n",PC);
 		if (CurrIMeta>0) {		// open code?
@@ -321,10 +324,6 @@ static inline unsigned int FindExecCode(unsigned int PC)
 #endif
 		P0 = PC = Exec_x86(G, __LINE__);
 		if (TheCPU.err) return PC;
-		/* on jumps, exit to process signals */
-		if (InterOps[Fetch(PC)]&0x80) break;
-		/* if all fails, stop infinite loops here */
-		temp--;
 	}
 	return PC;
 }
