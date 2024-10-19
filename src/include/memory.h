@@ -213,7 +213,7 @@ void *lowmemp(const void *ptr);
    restrictions it can be non-zero. Non-zero values block vm86 but at least
    give NULL pointer protection.
 */
-extern unsigned char * const mem_base;
+extern unsigned char *mem_base;
 
 /* lowmem_base points to a shared memory image of the area 0--1MB+64K.
    It does not have any holes or mapping for video RAM etc.
@@ -221,11 +221,8 @@ extern unsigned char * const mem_base;
    DOSEMU writes will not be trapped. This allows easy interference with
    simx86, NULL page protection, and removal of the VGA protected memory
    access hack.
-
-   It is set "const" to help GCC optimize accesses. In reality it is set only
-   once, at startup
 */
-extern char * const lowmem_base;
+extern char *lowmem_base;
 
 #define UNIX_READ_BYTE(addr)		(*(Bit8u *) (addr))
 #define UNIX_WRITE_BYTE(addr, val)	(*(Bit8u *) (addr) = (val) )
